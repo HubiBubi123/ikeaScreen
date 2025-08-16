@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IKEA – pełny ekran (spacja)</title>
+  <style>
+    :root {
+      --navy: #003366;      /* jaśniejsze granatowe tło */
+      --ikea-yellow: #ffd400; /* żółty jak w IKEA */
+    }
+
+    html, body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      background: var(--navy);
+      font-family: Arial, Helvetica, sans-serif;
+      color: white;
+    }
+
+    /* Duży napis IKEA w lewym górnym rogu */
+    .logo {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      font-size: clamp(48px, 8vw, 140px);
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: 2px;
+      color: var(--ikea-yellow);
+      user-select: none;
+      text-shadow: 0 2px 8px rgba(0,0,0,.25);
+    }
+  </style>
+</head>
+<body>
+  <div class="logo" aria-hidden="true">IKEA</div>
+
+  <script>
+    (function(){
+      async function toggleFullscreen(){
+        try {
+          if (!document.fullscreenElement) {
+            await document.documentElement.requestFullscreen();
+          } else {
+            await document.exitFullscreen();
+          }
+        } catch (err) {
+          console.error("Fullscreen error:", err);
+        }
+      }
+
+      // Przechwytuj naciśnięcie Spacji
+      window.addEventListener('keydown', function(e){
+        if (e.code === 'Space' || e.key === ' ') {
+          e.preventDefault();
+          toggleFullscreen();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
