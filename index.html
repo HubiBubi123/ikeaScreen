@@ -3,11 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>IKEA – pełny ekran (spacja)</title>
+  <title>IKEA</title>
   <style>
     :root {
       --navy: #003366;      /* jaśniejsze granatowe tło */
-      --ikea-yellow: #ffd400; /* żółty jak w IKEA */
     }
 
     html, body {
@@ -17,27 +16,23 @@
     body {
       margin: 0;
       background: var(--navy);
-      font-family: Arial, Helvetica, sans-serif;
-      color: white;
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
     }
 
-    /* Duży napis IKEA w lewym górnym rogu */
-    .logo {
+    .logo-img {
       position: fixed;
       top: 16px;
       left: 16px;
-      font-size: clamp(48px, 8vw, 140px);
-      line-height: 1;
-      font-weight: 800;
-      letter-spacing: 2px;
-      color: var(--ikea-yellow);
+      max-width: 300px;
+      height: auto;
       user-select: none;
-      text-shadow: 0 2px 8px rgba(0,0,0,.25);
     }
   </style>
 </head>
 <body>
-  <div class="logo" aria-hidden="true">IKEA</div>
+  <img src="ikeaScreen.png" alt="IKEA logo" class="logo-img" />
 
   <script>
     (function(){
