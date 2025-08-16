@@ -1,534 +1,62 @@
-<?php
-// ---- Jednoplikowa aplikacja PHP: Logowanie + Dokumenty TXT ----
-// Wymagania katalogowe: ten plik + ikeaScreen.png w tym samym folderze.
-// PHP utworzy: accounts.txt oraz katalog users/<uzytkownik>/docs
 
-session_start();
-
-// Ścieżki plików/katalogów
-$ACCOUNTS_FILE = __DIR__ . DIRECTORY_SEPARATOR . 'accounts.txt';
-$USERS_DIR     = __DIR__ . DIRECTORY_SEPARATOR . 'users';
-
-// Upewnij się, że baza i folder na użytkowników istnieją
-if (!file_exists($ACCOUNTS_FILE)) {
-    file_put_contents($ACCOUNTS_FILE, "", LOCK_EX);
-}
-if (!is_dir($USERS_DIR)) {
-    mkdir($USERS_DIR, 0775, true);
-}
-
-// Pomocnicze: bezpieczna nazwa (tylko litery/cyfry/_-)
-function safe_name($s) {
-    $s = trim($s);
-    $s = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $s);
-    // nie dopuszczamy pustej
-    return $s === '' ? null : $s;
-}
-
-// Wczytaj konta (format: nazwa:haslo\n; haslo może być puste)
-function load_accounts($file) {
-    $out = [];
-    $lines = file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    foreach ($lines as $line) {
-        // rozcinamy TYLKO pierwsze ":", żeby hasła mogły zawierać :
-        $parts = explode(':', $line, 2);
-        $user = $parts[0] ?? '';
-        $pass = $parts[1] ?? '';
-        if ($user !== '') $out[$user] = $pass;
-    }
-    return $out;
-}
-
-// Zapisz/aktualizuj konto do accounts.txt (append lub replace)
-function save_account($file, $username, $password) {
-    $accounts = load_accounts($file);
-    $accounts[$username] = $password;
-    $buf = '';
-    foreach ($accounts as $u => $p) {
-        $buf .= $u . ':' . $p . PHP_EOL;
-    }
-    file_put_contents($file, $buf, LOCK_EX);
-}
-
-// Ścieżka katalogu użytkownika
-function user_dir($username) {
-    global $USERS_DIR;
-    return $USERS_DIR . DIRECTORY_SEPARATOR . $username;
-}
-function user_docs_dir($username) {
-    return user_dir($username) . DIRECTORY_SEPARATOR . 'docs';
-}
-
-// Utwórz strukturę katalogów użytkownika jeśli brak
-function ensure_user_dirs($username) {
-    $ud = user_dir($username);
-    $dd = user_docs_dir($username);
-    if (!is_dir($ud)) mkdir($ud, 0775, true);
-    if (!is_dir($dd)) mkdir($dd, 0775, true);
-}
-
-// Lista dokumentów użytkownika (tylko .txt)
-function list_docs($username) {
-    $dd = user_docs_dir($username);
-    if (!is_dir($dd)) return [];
-    $files = glob($dd . DIRECTORY_SEPARATOR . '*.txt') ?: [];
-    // zwracamy nazwy bazowe bez ścieżki
-    return array_map('basename', $files);
-}
-
-// Odczyt zawartości dokumentu
-function read_doc($username, $filename) {
-    $safe = safe_name(pathinfo($filename, PATHINFO_FILENAME));
-    if ($safe === null) return '';
-    $path = user_docs_dir($username) . DIRECTORY_SEPARATOR . $safe . '.txt';
-    if (!is_file($path)) return '';
-    return file_get_contents($path);
-}
-
-// Zapis dokumentu
-function write_doc($username, $filename, $content) {
-    ensure_user_dirs($username);
-    $safe = safe_name(pathinfo($filename, PATHINFO_FILENAME));
-    if ($safe === null) return false;
-    $path = user_docs_dir($username) . DIRECTORY_SEPARATOR . $safe . '.txt';
-    return file_put_contents($path, $content, LOCK_EX) !== false;
-}
-
-// Usunięcie dokumentu
-function delete_doc($username, $filename) {
-    $safe = safe_name(pathinfo($filename, PATHINFO_FILENAME));
-    if ($safe === null) return false;
-    $path = user_docs_dir($username) . DIRECTORY_SEPARATOR . $safe . '.txt';
-    if (is_file($path)) return unlink($path);
-    return false;
-}
-
-// Prosty flash komunikat
-function flash($msg, $type='ok') {
-    $_SESSION['flash'] = ['msg' => $msg, 'type' => $type];
-}
-function get_flash() {
-    if (isset($_SESSION['flash'])) {
-        $f = $_SESSION['flash'];
-        unset($_SESSION['flash']);
-        return $f;
-    }
-    return null;
-}
-
-// ----- Obsługa akcji POST -----
-$action = $_POST['action'] ?? null;
-
-if ($action === 'register') {
-    $rawUser = $_POST['reg_username'] ?? '';
-    $rawPass = $_POST['reg_password'] ?? '';
-    $user = safe_name($rawUser);
-
-    if ($user === null) {
-        flash('Nieprawidłowa nazwa użytkownika.', 'err');
-    } else {
-        $accounts = load_accounts($ACCOUNTS_FILE);
-        if (isset($accounts[$user])) {
-            flash('Użytkownik już istnieje.', 'err');
-        } else {
-            // Hasło może być puste
-            save_account($ACCOUNTS_FILE, $user, $rawPass);
-            ensure_user_dirs($user);
-            flash('Konto utworzone. Możesz się zalogować.', 'ok');
-        }
-    }
-    header('Location: ' . $_SERVER['PHP_SELF']);
-    exit;
-}
-
-if ($action === 'login') {
-    $rawUser = $_POST['login_username'] ?? '';
-    $rawPass = $_POST['login_password'] ?? '';
-    $user = safe_name($rawUser);
-
-    if ($user === null) {
-        flash('Nieprawidłowa nazwa użytkownika.', 'err');
-        header('Location: ' . $_SERVER['PHP_SELF']); exit;
-    }
-    $accounts = load_accounts($ACCOUNTS_FILE);
-    if (!isset($accounts[$user])) {
-        flash('Takie konto nie istnieje.', 'err');
-    } else {
-        $stored = $accounts[$user];
-        // jeśli konto ma puste hasło – akceptuj puste
-        if ($stored === $rawPass) {
-            $_SESSION['user'] = $user;
-            flash('Zalogowano jako ' . htmlspecialchars($user), 'ok');
-        } else {
-            flash('Błędne hasło.', 'err');
-        }
-    }
-    header('Location: ' . $_SERVER['PHP_SELF']); exit;
-}
-
-if ($action === 'logout') {
-    session_unset();
-    session_destroy();
-    session_start();
-    flash('Wylogowano.', 'ok');
-    header('Location: ' . $_SERVER['PHP_SELF']); exit;
-}
-
-if ($action === 'create_doc' && isset($_SESSION['user'])) {
-    $name = $_POST['doc_name'] ?? '';
-    $content = $_POST['doc_content'] ?? '';
-    if ($name === '') {
-        flash('Podaj nazwę dokumentu.', 'err');
-    } else {
-        if (write_doc($_SESSION['user'], $name, $content)) {
-            flash('Dokument zapisany.', 'ok');
-        } else {
-            flash('Nie udało się zapisać dokumentu.', 'err');
-        }
-    }
-    header('Location: ' . $_SERVER['PHP_SELF']); exit;
-}
-
-if ($action === 'open_doc' && isset($_SESSION['user'])) {
-    // Załadowanie do edytora (przez GET &anchor)
-    $fname = $_POST['open_filename'] ?? '';
-    $_SESSION['open_doc'] = $fname;
-    header('Location: ' . $_SERVER['PHP_SELF'] . '#editor'); exit;
-}
-
-if ($action === 'delete_doc' && isset($_SESSION['user'])) {
-    $fname = $_POST['delete_filename'] ?? '';
-    if ($fname === '') {
-        flash('Wybierz dokument do usunięcia.', 'err');
-    } else {
-        if (delete_doc($_SESSION['user'], $fname)) {
-            flash('Dokument usunięty.', 'ok');
-            if (isset($_SESSION['open_doc']) && $_SESSION['open_doc'] === $fname) {
-                unset($_SESSION['open_doc']);
-            }
-        } else {
-            flash('Nie udało się usunąć dokumentu.', 'err');
-        }
-    }
-    header('Location: ' . $_SERVER['PHP_SELF']); exit;
-}
-
-if ($action === 'download_txt' && isset($_SESSION['user'])) {
-    $fname = $_POST['download_filename'] ?? '';
-    $safe = safe_name(pathinfo($fname, PATHINFO_FILENAME));
-    if ($safe !== null) {
-        $path = user_docs_dir($_SESSION['user']) . DIRECTORY_SEPARATOR . $safe . '.txt';
-        if (is_file($path)) {
-            header('Content-Type: text/plain; charset=utf-8');
-            header('Content-Disposition: attachment; filename="'.basename($path).'"');
-            readfile($path);
-            exit;
-        }
-    }
-    flash('Nie znaleziono pliku do pobrania.', 'err');
-    header('Location: ' . $_SERVER['PHP_SELF']); exit;
-}
-
-// Przygotuj dane do widoku
-$flash = get_flash();
-$logged = isset($_SESSION['user']);
-$user = $logged ? $_SESSION['user'] : null;
-$docs = $logged ? list_docs($user) : [];
-$openDocName = ($logged && isset($_SESSION['open_doc'])) ? $_SESSION['open_doc'] : '';
-$openDocContent = ($openDocName !== '') ? read_doc($user, $openDocName) : '';
-
-?><!DOCTYPE html>
+<!doctype html>
 <html lang="pl">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>IKEA</title>
-<style>
-    :root{
-        --bg: #2e3f90;          /* jasno-granatowe */
-        --bg-soft: #3a4aa0;
-        --card: #ffffff;
-        --ink: #0f172a;
-        --muted: #64748b;
-        --accent: #facc15;      /* żółty akcent */
-        --ok: #16a34a;
-        --err: #dc2626;
-        --shadow: 0 10px 30px rgba(0,0,0,.12);
-        --radius: 18px;
-    }
-    *{ box-sizing: border-box; }
-    body{
-        margin:0;
-        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-        color: var(--ink);
-        background: radial-gradient(1200px 600px at 20% 0%, var(--bg-soft), var(--bg));
-        min-height: 100vh;
-    }
-    /* logo w lewym górnym rogu */
-    .logo{
-        position: fixed;
-        top: 16px; left: 16px;
-        width: 140px; height: auto;
-        z-index: 10;
-        filter: drop-shadow(0 6px 16px rgba(0,0,0,.25));
-        user-select: none;
-        pointer-events: none;
-    }
-    .wrap{
-        max-width: 1100px;
-        margin: 0 auto;
-        padding: 120px 16px 40px;
-    }
-    .card{
-        background: var(--card);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow);
-        padding: 24px;
-        margin-bottom: 24px;
-        backdrop-filter: blur(8px);
-    }
-    h1{
-        margin: 0 0 10px;
-        font-size: 32px;
-        letter-spacing: .2px;
-    }
-    p.lead{ margin: 0 0 20px; color: var(--muted) }
-    .row{ display: grid; gap: 16px }
-    @media (min-width: 880px){ .row.cols-2{ grid-template-columns: 1fr 1fr } }
-
-    .btn{
-        appearance: none; border: none; cursor: pointer;
-        padding: 12px 16px; border-radius: 14px;
-        box-shadow: var(--shadow);
-        background: var(--ink); color: white; font-weight: 600;
-        transition: transform .06s ease, filter .2s ease, opacity .2s ease;
-    }
-    .btn:hover{ transform: translateY(-1px); }
-    .btn.secondary{ background: #1f2937 }
-    .btn.ghost{ background: transparent; color: var(--ink); border: 2px solid #e5e7eb; box-shadow: none }
-    .btn.warn{ background: var(--err) }
-    .btn.ok{ background: var(--ok) }
-    .btn.accent{ background: var(--accent); color: #1e293b }
-    .btn.small{ padding: 8px 12px; border-radius: 12px; font-size: 14px }
-
-    .grid-actions{ display:flex; gap: 10px; flex-wrap: wrap }
-
-    form.inline{ display:inline }
-
-    input[type="text"], input[type="password"], textarea, select{
-        width: 100%;
-        padding: 12px 14px;
-        border-radius: 12px;
-        border: 1px solid #e5e7eb;
-        background: #fff;
-        font-size: 15px;
-        outline: none;
-        transition: border-color .2s ease, box-shadow .2s ease;
-    }
-    input:focus, textarea:focus{ border-color:#c7d2fe; box-shadow: 0 0 0 4px rgba(59,130,246,.15) }
-    label{ display:block; font-weight:600; margin: 6px 0 6px }
-    textarea{ min-height: 240px; resize: vertical }
-
-    .muted{ color: var(--muted) }
-    .flash{ padding: 12px 14px; border-radius: 12px; margin-bottom: 16px; font-weight: 600 }
-    .flash.ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0 }
-    .flash.err{ background: #fef2f2; color: #991b1b; border: 1px solid #fecaca }
-
-    .doc-list{ display:flex; gap:10px; flex-wrap:wrap; margin-top:10px }
-    .badge{
-        background:#f1f5f9; padding:8px 12px; border-radius:12px; font-weight:600;
-        box-shadow: inset 0 0 0 1px #e2e8f0;
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IKEA</title>
+  <style>
+    :root {
+      --navy: #003366;      /* jaśniejsze granatowe tło */
     }
 
-    .footer{
-        text-align:center; color:#e5e7eb; padding: 24px 0 40px;
+    html, body {
+      height: 100%;
     }
-    .kbd{
-        display:inline-block; padding: 2px 6px; border: 1px solid #cbd5e1; border-bottom-width:2px;
-        border-radius:6px; background:#f8fafc; font-size: 12px; font-weight:700;
-        color:#334155; margin: 0 2px;
+
+    body {
+      margin: 0;
+      background: var(--navy);
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
     }
-</style>
+
+    .logo-img {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      max-width: 300px;
+      height: auto;
+      user-select: none;
+    }
+  </style>
 </head>
 <body>
-    <img src="ikeaScreen.png" alt="IKEA" class="logo">
+  <img src="ikeaScreen.png" alt="IKEA logo" class="logo-img" />
 
-    <div class="wrap">
-        <?php if ($flash): ?>
-            <div class="flash <?= htmlspecialchars($flash['type']) ?>"><?= htmlspecialchars($flash['msg']) ?></div>
-        <?php endif; ?>
+  <script>
+    (function(){
+      async function toggleFullscreen(){
+        try {
+          if (!document.fullscreenElement) {
+            await document.documentElement.requestFullscreen();
+          } else {
+            await document.exitFullscreen();
+          }
+        } catch (err) {
+          console.error("Fullscreen error:", err);
+        }
+      }
 
-        <?php if (!$logged): ?>
-            <div class="card" id="home">
-                <h1>Witaj!</h1>
-                <p class="lead">Zaloguj się lub załóż konto, aby tworzyć i edytować dokumenty TXT. W każdej sekcji naciśnij
-                    <span class="kbd">Spacja</span> + <span class="kbd">F</span>, aby przełączyć pełny ekran.</p>
-                <div class="grid-actions" style="margin-top:10px">
-                    <button class="btn accent" onclick="togglePanel('login')">Zaloguj</button>
-                    <button class="btn" onclick="togglePanel('register')">Zarejestruj</button>
-                </div>
-            </div>
-
-            <div class="row cols-2">
-                <div class="card" id="panel-login" style="display:none">
-                    <h2>Logowanie</h2>
-                    <form method="post">
-                        <input type="hidden" name="action" value="login">
-                        <label>Nazwa użytkownika</label>
-                        <input type="text" name="login_username" required>
-                        <label>Hasło <span class="muted">(zostaw puste jeśli konto bez hasła)</span></label>
-                        <input type="password" name="login_password">
-                        <div style="margin-top:12px; display:flex; gap:10px">
-                            <button class="btn ok" type="submit">Zaloguj</button>
-                            <button class="btn ghost" type="button" onclick="togglePanel('register')">Nie masz konta?</button>
-                        </div>
-                    </form>
-                </div>
-
-                <div class="card" id="panel-register" style="display:none">
-                    <h2>Rejestracja</h2>
-                    <form method="post">
-                        <input type="hidden" name="action" value="register">
-                        <label>Nazwa użytkownika</label>
-                        <input type="text" name="reg_username" required>
-                        <label>Hasło <span class="muted">(opcjonalne)</span></label>
-                        <input type="password" name="reg_password">
-                        <div style="margin-top:12px">
-                            <button class="btn ok" type="submit">Utwórz konto</button>
-                        </div>
-                        <p class="muted" style="margin-top:10px">Dane kont zapisywane są w <strong>accounts.txt</strong>.</p>
-                    </form>
-                </div>
-            </div>
-        <?php else: ?>
-            <div class="card" id="dashboard">
-                <h1>Hej, <?= htmlspecialchars($user) ?> 👋</h1>
-                <p class="lead">Twoje dokumenty w <code>users/<?= htmlspecialchars($user) ?>/docs</code></p>
-                <div class="grid-actions" style="margin-top:8px">
-                    <form method="post" class="inline">
-                        <input type="hidden" name="action" value="logout">
-                        <button class="btn secondary" type="submit">Wyloguj</button>
-                    </form>
-                </div>
-            </div>
-
-            <div class="row cols-2">
-                <div class="card" id="files">
-                    <h2>Twoje pliki</h2>
-                    <?php if (empty($docs)): ?>
-                        <p class="muted">Brak dokumentów. Utwórz pierwszy poniżej.</p>
-                    <?php else: ?>
-                        <div class="doc-list" style="margin-bottom:12px">
-                            <?php foreach ($docs as $f): ?>
-                                <span class="badge"><?= htmlspecialchars($f) ?></span>
-                            <?php endforeach; ?>
-                        </div>
-                        <div style="display:flex; gap:8px; flex-wrap:wrap">
-                            <form method="post" class="inline">
-                                <input type="hidden" name="action" value="open_doc">
-                                <select name="open_filename">
-                                    <?php foreach ($docs as $f): ?>
-                                        <option value="<?= htmlspecialchars($f) ?>" <?= ($openDocName===$f?'selected':'') ?>>
-                                            <?= htmlspecialchars($f) ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <button class="btn small" type="submit">Otwórz</button>
-                            </form>
-
-                            <form method="post" class="inline" onsubmit="return confirm('Usunąć wybrany dokument?')">
-                                <input type="hidden" name="action" value="delete_doc">
-                                <select name="delete_filename">
-                                    <?php foreach ($docs as $f): ?>
-                                        <option value="<?= htmlspecialchars($f) ?>"><?= htmlspecialchars($f) ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <button class="btn small warn" type="submit">Usuń</button>
-                            </form>
-
-                            <form method="post" class="inline">
-                                <input type="hidden" name="action" value="download_txt">
-                                <select name="download_filename">
-                                    <?php foreach ($docs as $f): ?>
-                                        <option value="<?= htmlspecialchars($f) ?>"><?= htmlspecialchars($f) ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <button class="btn small" type="submit">Pobierz TXT</button>
-                            </form>
-                        </div>
-                    <?php endif; ?>
-                </div>
-
-                <div class="card" id="editor">
-                    <h2>Edytor</h2>
-                    <form method="post">
-                        <input type="hidden" name="action" value="create_doc">
-                        <label>Nazwa pliku (bez rozszerzenia)</label>
-                        <input type="text" name="doc_name" value="<?= htmlspecialchars($openDocName ? pathinfo($openDocName, PATHINFO_FILENAME) : '') ?>" placeholder="np. notatki" required>
-                        <label>Zawartość</label>
-                        <textarea name="doc_content" placeholder="Zacznij pisać..."><?= htmlspecialchars($openDocContent) ?></textarea>
-                        <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap">
-                            <button class="btn ok" type="submit">Zapisz</button>
-                            <button class="btn ghost" type="button" onclick="clearEditor()">Wyczyść</button>
-                        </div>
-                        <p class="muted" style="margin-top:10px">Zapisywane jako <strong>.txt</strong>. (PDF: można dodać później przez bibliotekę PDF po stronie PHP.)</p>
-                    </form>
-                </div>
-            </div>
-        <?php endif; ?>
-
-        <div class="footer">
-            <small>Tryb pełnoekranowy: naciśnij <span class="kbd">Spacja</span> + <span class="kbd">F</span>.</small>
-        </div>
-    </div>
-
-<script>
-// Przełączanie paneli logowania/rejestracji
-function togglePanel(which){
-    const login = document.getElementById('panel-login');
-    const reg   = document.getElementById('panel-register');
-    if (which==='login'){ login.style.display='block'; reg.style.display='none'; }
-    else if (which==='register'){ login.style.display='none'; reg.style.display='block'; }
-}
-
-// Wyczyść edytor
-function clearEditor(){
-    const name = document.querySelector('input[name="doc_name"]');
-    const content = document.querySelector('textarea[name="doc_content"]');
-    if (confirm('Wyczyścić pola edytora?')) {
-        // Nie kasujemy aktualnie otwartej nazwy, tylko treść
-        content.value = '';
-        content.focus();
-    }
-}
-
-// Pełny ekran: Spacja + F (w dowolnej sekcji)
-let spaceArmed = false;
-let spaceTimer = null;
-
-window.addEventListener('keydown', (e) => {
-    if (e.code === 'Space'){
-        spaceArmed = true;
-        clearTimeout(spaceTimer);
-        spaceTimer = setTimeout(()=>{ spaceArmed = false; }, 350); // okienko ~350ms
-    }
-    if (e.code === 'KeyF' && spaceArmed){
-        e.preventDefault();
-        toggleFullscreen();
-        spaceArmed = false;
-        clearTimeout(spaceTimer);
-    }
-});
-
-function toggleFullscreen(){
-    const doc = document;
-    if (!doc.fullscreenElement){
-        (doc.documentElement.requestFullscreen && doc.documentElement.requestFullscreen())
-        || (doc.body.requestFullscreen && doc.body.requestFullscreen());
-    } else {
-        doc.exitFullscreen && doc.exitFullscreen();
-    }
-}
-</script>
+      // Przechwytuj naciśnięcie Spacji
+      window.addEventListener('keydown', function(e){
+        if (e.code === 'Space' || e.key === ' ') {
+          e.preventDefault();
+          toggleFullscreen();
+        }
+      });
+    })();
+  </script>
 </body>
 </html>
